@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # 1. ClickHouse (High-speed Columnar DB)
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: tip-clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native protocol
+    volumes:
+      - ch_data:/var/lib/clickhouse
+      - ./init-db:/docker-entrypoint-initdb.d
+    environment:
+      CLICKHOUSE_DB: threat_intel
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Stack (Cache + Bloom Filter)
+  redis:
+    image: redis/redis-stack:latest
+    container_name: tip-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight UI
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. MinIO (Object Storage for Misc Data)
+  minio:
+    image: minio/minio:latest
+    container_name: tip-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9002:9000"  # API (using 9002 to avoid conflict with ClickHouse)
+      - "9001:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: SuperSecretPassword123
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 4. Qdrant (Vector Search - Phase 2)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: tip-qdrant
+    ports:
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ch_data:
+  redis_data:
+  minio_data:
+  qdrant_data:
+
+networks:
+  default:
+    name: tip-network
